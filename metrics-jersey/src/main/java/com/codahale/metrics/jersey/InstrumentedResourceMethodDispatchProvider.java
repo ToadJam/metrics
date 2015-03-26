@@ -1,6 +1,7 @@
 package com.codahale.metrics.jersey;
 
 import com.codahale.metrics.Metric;
+import com.codahale.metrics.annotation.MetricNameParam;
 import com.sun.jersey.api.core.HttpContext;
 import com.sun.jersey.api.model.AbstractResourceMethod;
 import com.sun.jersey.core.spi.component.ComponentScope;
@@ -16,13 +17,20 @@ import com.codahale.metrics.annotation.Metered;
 import com.codahale.metrics.annotation.Timed;
 
 import com.sun.jersey.spi.inject.Injectable;
+import com.sun.jersey.api.model.Parameter;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import static com.codahale.metrics.MetricRegistry.name;
 
 class InstrumentedResourceMethodDispatchProvider implements ResourceMethodDispatchProvider {
+    private interface MetricBuilder<T extends Metric> {
+        T buildMetric(MetricRegistry metricRegistry, String name);
+    }
+
     private interface MetricProvider<T extends Metric> {
         T getMetric(HttpContext httpContext);
     }
@@ -40,37 +48,38 @@ class InstrumentedResourceMethodDispatchProvider implements ResourceMethodDispat
         }
     }
 
-    private abstract static class ContextSensitiveMetricProvider<T extends Metric> implements MetricProvider<T> {
+    private static class ContextSensitiveMetricProvider<T extends Metric> implements MetricProvider<T> {
         private String baseName;
         private InjectableValuesProvider injectableValuesProvider;
         private MetricRegistry metricRegistry;
+        private MetricBuilder<T> metricBuilder;
 
-        private ContextSensitiveMetricProvider(String baseName, InjectableValuesProvider injectableValuesProvider, MetricRegistry metricRegistry) {
+        private ContextSensitiveMetricProvider(String baseName, InjectableValuesProvider injectableValuesProvider, MetricRegistry metricRegistry, MetricBuilder<T> metricBuilder) {
             this.baseName = baseName;
             this.injectableValuesProvider = injectableValuesProvider;
             this.metricRegistry = metricRegistry;
+            this.metricBuilder = metricBuilder;
         }
-
-        protected abstract T createMetricFromName(MetricRegistry metricRegistry, String name);
 
         @Override
         public T getMetric(HttpContext httpContext) {
             String formattedName = String.format(baseName, injectableValuesProvider.getInjectableValues(httpContext));
-            return createMetricFromName(metricRegistry, formattedName);
+            return metricBuilder.buildMetric(metricRegistry, formattedName);
         }
     }
 
     private static class TimedRequestDispatcher implements RequestDispatcher {
         private final RequestDispatcher underlying;
-        private final Timer timer;
+        private final MetricProvider<Timer> metricProvider;
 
-        private TimedRequestDispatcher(RequestDispatcher underlying, Timer timer) {
+        private TimedRequestDispatcher(RequestDispatcher underlying, MetricProvider<Timer> metricProvider) {
             this.underlying = underlying;
-            this.timer = timer;
+            this.metricProvider = metricProvider;
         }
 
         @Override
         public void dispatch(Object resource, HttpContext httpContext) {
+            Timer timer = metricProvider.getMetric(httpContext);
             final Timer.Context context = timer.time();
             try {
                 underlying.dispatch(resource, httpContext);
@@ -82,15 +91,16 @@ class InstrumentedResourceMethodDispatchProvider implements ResourceMethodDispat
 
     private static class MeteredRequestDispatcher implements RequestDispatcher {
         private final RequestDispatcher underlying;
-        private final Meter meter;
+        private final MetricProvider<Meter> metricProvider;
 
-        private MeteredRequestDispatcher(RequestDispatcher underlying, Meter meter) {
+        private MeteredRequestDispatcher(RequestDispatcher underlying, MetricProvider<Meter> metricProvider) {
             this.underlying = underlying;
-            this.meter = meter;
+            this.metricProvider = metricProvider;
         }
 
         @Override
         public void dispatch(Object resource, HttpContext httpContext) {
+            Meter meter = metricProvider.getMetric(httpContext);
             meter.mark();
             underlying.dispatch(resource, httpContext);
         }
@@ -98,14 +108,14 @@ class InstrumentedResourceMethodDispatchProvider implements ResourceMethodDispat
 
     private static class ExceptionMeteredRequestDispatcher implements RequestDispatcher {
         private final RequestDispatcher underlying;
-        private final Meter meter;
+        private final MetricProvider<Meter> metricProvider;
         private final Class<? extends Throwable> exceptionClass;
 
         private ExceptionMeteredRequestDispatcher(RequestDispatcher underlying,
-                                                  Meter meter,
+                                                  MetricProvider<Meter> metricProvider,
                                                   Class<? extends Throwable> exceptionClass) {
             this.underlying = underlying;
-            this.meter = meter;
+            this.metricProvider = metricProvider;
             this.exceptionClass = exceptionClass;
         }
 
@@ -116,6 +126,7 @@ class InstrumentedResourceMethodDispatchProvider implements ResourceMethodDispat
             } catch (Exception e) {
                 if (exceptionClass.isAssignableFrom(e.getClass()) ||
                         (e.getCause() != null && exceptionClass.isAssignableFrom(e.getCause().getClass()))) {
+                    Meter meter = metricProvider.getMetric(httpContext);
                     meter.mark();
                 }
                 InstrumentedResourceMethodDispatchProvider.<RuntimeException>throwUnchecked(e);
@@ -148,25 +159,29 @@ class InstrumentedResourceMethodDispatchProvider implements ResourceMethodDispat
             return null;
         }
 
-        List<Injectable> parameterizedInjectables = new ArrayList<Injectable>(method.getParameters().size());
-        ServerInjectableProviderFactory serverInjectableProviderFactory = new ServerInjectableProviderFactory();
-        for (int i = 0; i < method.getParameters().size(); i++) {
-            parameterizedInjectables.add(serverInjectableProviderFactory.getInjectable(method.getMethod(), method.getParameters().get(i), ComponentScope.PerRequest));
-        }
-        InjectableValuesProvider injectableValuesProvider = new InjectableValuesProvider(parameterizedInjectables);
-
+        InjectableValuesProvider injectableValuesProvider = getInjectableValuesProvider(method);
         if (method.getMethod().isAnnotationPresent(Timed.class)) {
             final Timed annotation = method.getMethod().getAnnotation(Timed.class);
             final String name = chooseName(annotation.name(), annotation.absolute(), method);
-            final Timer timer = registry.timer(name);
-            dispatcher = new TimedRequestDispatcher(dispatcher, timer);
+            MetricProvider<Timer> metricProvider = getMetricProvider(name, injectableValuesProvider, new MetricBuilder<Timer>() {
+                @Override
+                public Timer buildMetric(MetricRegistry metricRegistry, String name) {
+                    return metricRegistry.timer(name);
+                }
+            });
+            dispatcher = new TimedRequestDispatcher(dispatcher, metricProvider);
         }
 
         if (method.getMethod().isAnnotationPresent(Metered.class)) {
             final Metered annotation = method.getMethod().getAnnotation(Metered.class);
             final String name = chooseName(annotation.name(), annotation.absolute(), method);
-            final Meter meter = registry.meter(name);
-            dispatcher = new MeteredRequestDispatcher(dispatcher, meter);
+            MetricProvider<Meter> metricProvider = getMetricProvider(name, injectableValuesProvider, new MetricBuilder<Meter>() {
+                @Override
+                public Meter buildMetric(MetricRegistry metricRegistry, String name) {
+                    return metricRegistry.meter(name);
+                }
+            });
+            dispatcher = new MeteredRequestDispatcher(dispatcher, metricProvider);
         }
 
         if (method.getMethod().isAnnotationPresent(ExceptionMetered.class)) {
@@ -176,13 +191,52 @@ class InstrumentedResourceMethodDispatchProvider implements ResourceMethodDispat
                                            annotation.absolute(),
                                            method,
                                            ExceptionMetered.DEFAULT_NAME_SUFFIX);
-            final Meter meter = registry.meter(name);
+            MetricProvider<Meter> metricProvider = getMetricProvider(name, injectableValuesProvider, new MetricBuilder<Meter>() {
+                @Override
+                public Meter buildMetric(MetricRegistry metricRegistry, String name) {
+                    return metricRegistry.meter(name);
+                }
+            });
             dispatcher = new ExceptionMeteredRequestDispatcher(dispatcher,
-                                                               meter,
+                                                               metricProvider,
                                                                annotation.cause());
         }
 
         return dispatcher;
+    }
+
+    private InjectableValuesProvider getInjectableValuesProvider(AbstractResourceMethod method) {
+        ServerInjectableProviderFactory serverInjectableProviderFactory = new ServerInjectableProviderFactory();
+
+        InjectableValuesProvider injectableValuesProvider = null;
+        Map<Integer, Injectable> injectableMap = new HashMap<Integer, Injectable>();
+        for (Parameter parameter : method.getParameters()) {
+            MetricNameParam metricNameParam = parameter.getAnnotation(MetricNameParam.class);
+            if (metricNameParam != null) {
+                injectableMap.put(metricNameParam.value(), serverInjectableProviderFactory.getInjectable(method.getMethod(), parameter, ComponentScope.PerRequest));
+            }
+        }
+        if (injectableMap.size() > 0) {
+            List<Injectable> parameterizedInjectables = new ArrayList<Injectable>(injectableMap.size());
+            for (int i = 0; i < injectableMap.size(); i++) {
+                Injectable injectableForIndex = injectableMap.get(i);
+                if (injectableForIndex == null) {
+                    throw new IllegalArgumentException("Provided MetricNameParam values were non-contiguous");
+                }
+                parameterizedInjectables.add(injectableForIndex);
+            }
+            injectableValuesProvider = new InjectableValuesProvider(parameterizedInjectables);
+        }
+
+        return injectableValuesProvider;
+    }
+
+    private <T extends Metric> MetricProvider<T> getMetricProvider(String name, InjectableValuesProvider injectableValuesProvider, MetricBuilder<T> metricBuilder) {
+        if (injectableValuesProvider != null) {
+            return new ContextSensitiveMetricProvider<T>(name, injectableValuesProvider, registry, metricBuilder);
+        } else {
+            return new StaticMetricProvider<T>(metricBuilder.buildMetric(registry, name));
+        }
     }
 
     private String chooseName(String explicitName, boolean absolute, AbstractResourceMethod method, String... suffixes) {
