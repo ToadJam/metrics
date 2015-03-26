@@ -1,7 +1,11 @@
 package com.codahale.metrics.jersey;
 
+import com.codahale.metrics.Metric;
 import com.sun.jersey.api.core.HttpContext;
 import com.sun.jersey.api.model.AbstractResourceMethod;
+import com.sun.jersey.core.spi.component.ComponentScope;
+import com.sun.jersey.server.impl.inject.InjectableValuesProvider;
+import com.sun.jersey.server.impl.inject.ServerInjectableProviderFactory;
 import com.sun.jersey.spi.container.ResourceMethodDispatchProvider;
 import com.sun.jersey.spi.dispatch.RequestDispatcher;
 import com.codahale.metrics.Meter;
@@ -11,9 +15,51 @@ import com.codahale.metrics.annotation.ExceptionMetered;
 import com.codahale.metrics.annotation.Metered;
 import com.codahale.metrics.annotation.Timed;
 
+import com.sun.jersey.spi.inject.Injectable;
+
+import java.util.ArrayList;
+import java.util.List;
+
 import static com.codahale.metrics.MetricRegistry.name;
 
 class InstrumentedResourceMethodDispatchProvider implements ResourceMethodDispatchProvider {
+    private interface MetricProvider<T extends Metric> {
+        T getMetric(HttpContext httpContext);
+    }
+
+    private static class StaticMetricProvider<T extends Metric> implements MetricProvider<T> {
+        private T metric;
+
+        private StaticMetricProvider(T metric) {
+            this.metric = metric;
+        }
+
+        @Override
+        public T getMetric(HttpContext httpContext) {
+            return metric;
+        }
+    }
+
+    private abstract static class ContextSensitiveMetricProvider<T extends Metric> implements MetricProvider<T> {
+        private String baseName;
+        private InjectableValuesProvider injectableValuesProvider;
+        private MetricRegistry metricRegistry;
+
+        private ContextSensitiveMetricProvider(String baseName, InjectableValuesProvider injectableValuesProvider, MetricRegistry metricRegistry) {
+            this.baseName = baseName;
+            this.injectableValuesProvider = injectableValuesProvider;
+            this.metricRegistry = metricRegistry;
+        }
+
+        protected abstract T createMetricFromName(MetricRegistry metricRegistry, String name);
+
+        @Override
+        public T getMetric(HttpContext httpContext) {
+            String formattedName = String.format(baseName, injectableValuesProvider.getInjectableValues(httpContext));
+            return createMetricFromName(metricRegistry, formattedName);
+        }
+    }
+
     private static class TimedRequestDispatcher implements RequestDispatcher {
         private final RequestDispatcher underlying;
         private final Timer timer;
@@ -101,6 +147,13 @@ class InstrumentedResourceMethodDispatchProvider implements ResourceMethodDispat
         if (dispatcher == null) {
             return null;
         }
+
+        List<Injectable> parameterizedInjectables = new ArrayList<Injectable>(method.getParameters().size());
+        ServerInjectableProviderFactory serverInjectableProviderFactory = new ServerInjectableProviderFactory();
+        for (int i = 0; i < method.getParameters().size(); i++) {
+            parameterizedInjectables.add(serverInjectableProviderFactory.getInjectable(method.getMethod(), method.getParameters().get(i), ComponentScope.PerRequest));
+        }
+        InjectableValuesProvider injectableValuesProvider = new InjectableValuesProvider(parameterizedInjectables);
 
         if (method.getMethod().isAnnotationPresent(Timed.class)) {
             final Timed annotation = method.getMethod().getAnnotation(Timed.class);
