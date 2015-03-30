@@ -7,6 +7,16 @@ import com.sun.jersey.api.model.AbstractResourceMethod;
 import com.sun.jersey.core.spi.component.ComponentScope;
 import com.sun.jersey.server.impl.inject.InjectableValuesProvider;
 import com.sun.jersey.server.impl.inject.ServerInjectableProviderFactory;
+import com.sun.jersey.server.impl.model.parameter.CookieParamInjectableProvider;
+import com.sun.jersey.server.impl.model.parameter.FormParamInjectableProvider;
+import com.sun.jersey.server.impl.model.parameter.HeaderParamInjectableProvider;
+import com.sun.jersey.server.impl.model.parameter.HttpContextInjectableProvider;
+import com.sun.jersey.server.impl.model.parameter.MatrixParamInjectableProvider;
+import com.sun.jersey.server.impl.model.parameter.PathParamInjectableProvider;
+import com.sun.jersey.server.impl.model.parameter.QueryParamInjectableProvider;
+import com.sun.jersey.server.impl.model.parameter.multivalued.MultivaluedParameterExtractorFactory;
+import com.sun.jersey.server.impl.model.parameter.multivalued.MultivaluedParameterExtractorProvider;
+import com.sun.jersey.server.impl.model.parameter.multivalued.StringReaderFactory;
 import com.sun.jersey.spi.container.ResourceMethodDispatchProvider;
 import com.sun.jersey.spi.dispatch.RequestDispatcher;
 import com.codahale.metrics.Meter;
@@ -207,6 +217,15 @@ class InstrumentedResourceMethodDispatchProvider implements ResourceMethodDispat
 
     private InjectableValuesProvider getInjectableValuesProvider(AbstractResourceMethod method) {
         ServerInjectableProviderFactory serverInjectableProviderFactory = new ServerInjectableProviderFactory();
+        MultivaluedParameterExtractorProvider mpep =
+                new MultivaluedParameterExtractorFactory(new StringReaderFactory());
+        serverInjectableProviderFactory.add(new CookieParamInjectableProvider(mpep));
+        serverInjectableProviderFactory.add(new HeaderParamInjectableProvider(mpep));
+        serverInjectableProviderFactory.add(new HttpContextInjectableProvider());
+        serverInjectableProviderFactory.add(new MatrixParamInjectableProvider(mpep));
+        serverInjectableProviderFactory.add(new PathParamInjectableProvider(mpep));
+        serverInjectableProviderFactory.add(new QueryParamInjectableProvider(mpep));
+        serverInjectableProviderFactory.add(new FormParamInjectableProvider(mpep));
 
         InjectableValuesProvider injectableValuesProvider = null;
         Map<Integer, Injectable> injectableMap = new HashMap<Integer, Injectable>();
