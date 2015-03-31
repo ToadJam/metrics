@@ -102,7 +102,7 @@ public class InstrumentedResourceMethodApplicationListener implements Applicatio
             java.util.List<org.glassfish.hk2.api.Factory<?>> valueProviders = invocable.getValueProviders(serviceLocator);
             Object[] paramList = new Object[paramIndexList.size()];
             for (int i = 0; i < paramIndexList.size(); i++) {
-                paramList[i] = valueProviders.get(i).provide();
+                paramList[i] = valueProviders.get(paramIndexList.get(i)).provide();
             }
             String formattedName = String.format(baseName, paramList);
             return metricBuilder.buildMetric(metricRegistry, formattedName);

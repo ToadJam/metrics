@@ -39,7 +39,7 @@ public class InstrumentedResource {
     @GET
     @Timed(name = "timedCounter[%s]", absolute = true)
     @Path("/customMetric")
-    public String customMetric(@MetricNameParam(0) @QueryParam("param") String param) {
-        return param;
+    public String customMetric(@QueryParam("placeholder") String placeholder, @MetricNameParam(0) @QueryParam("param") String param) {
+            return param;
     }
 }
