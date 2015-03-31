@@ -2,6 +2,7 @@ package com.codahale.metrics.jersey2.resources;
 
 import com.codahale.metrics.annotation.ExceptionMetered;
 import com.codahale.metrics.annotation.Metered;
+import com.codahale.metrics.annotation.MetricNameParam;
 import com.codahale.metrics.annotation.Timed;
 
 import javax.ws.rs.*;
@@ -33,5 +34,12 @@ public class InstrumentedResource {
             throw new IOException("AUGH");
         }
         return "fuh";
+    }
+
+    @GET
+    @Timed(name = "timedCounter[%s]", absolute = true)
+    @Path("/customMetric")
+    public String customMetric(@MetricNameParam(0) @QueryParam("param") String param) {
+        return param;
     }
 }

@@ -2,6 +2,7 @@ package com.codahale.metrics.jersey2;
 
 import com.codahale.metrics.MetricRegistry;
 import com.codahale.metrics.SharedMetricRegistries;
+import org.glassfish.jersey.ServiceLocatorProvider;
 
 import javax.ws.rs.core.Feature;
 import javax.ws.rs.core.FeatureContext;
@@ -43,7 +44,7 @@ public class MetricsFeature implements Feature {
      */
     @Override
     public boolean configure(FeatureContext context) {
-        context.register(new InstrumentedResourceMethodApplicationListener(registry));
+        context.register(new InstrumentedResourceMethodApplicationListener(registry, ServiceLocatorProvider.getServiceLocator(context)));
         return true;
     }
 }
