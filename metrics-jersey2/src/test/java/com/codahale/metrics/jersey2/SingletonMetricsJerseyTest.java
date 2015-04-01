@@ -98,25 +98,25 @@ public class SingletonMetricsJerseyTest extends JerseyTest {
     public void customMetricNames() {
         int startingCount = registry.getTimers().entrySet().size();
 
-        // confirm that a call using a parameter tagged with @MetricNameParam results results in
-        // a new metric being produced
-        assertThat(target("customMetric").queryParam("param", "foo").request().get(String.class))
+        // Confirm that a call using a query parameter tagged with @MetricNameParam results in
+        // a new timer metric being produced.
+        assertThat(target("customMetricName").queryParam("nameParam", "foo").request().get(String.class))
                 .isEqualTo("foo");
         assertThat(registry.getTimers().entrySet().size()).isEqualTo(startingCount + 1);
-        assertThat(registry.getTimers().get("timedCounter[foo]").getCount()).isEqualTo(1);
+        assertThat(registry.getTimers().get("timed[foo]").getCount()).isEqualTo(1);
 
-        // confirm that another call with a different param value results in a second metric being produced
-        assertThat(target("customMetric").queryParam("param", "bar").request().get(String.class))
+        // Confirm that another call with a different param value results in a second metric being produced.
+        assertThat(target("customMetricName").queryParam("nameParam", "bar").request().get(String.class))
                 .isEqualTo("bar");
         assertThat(registry.getTimers().entrySet().size()).isEqualTo(startingCount + 2);
-        assertThat(registry.getTimers().get("timedCounter[bar]").getCount()).isEqualTo(1);
+        assertThat(registry.getTimers().get("timed[bar]").getCount()).isEqualTo(1);
 
-        // confirm that re-issuing a call with the same parameter causes the correct metric to be properly
-        // incremented but doesn't add a new one
-        assertThat(target("customMetric").queryParam("param", "foo").request().get(String.class))
-                .isEqualTo("foo");
+        // Confirm that re-issuing a call with the same parameter causes the correct metric to be properly
+        // incremented but doesn't add a new one.
+        assertThat(target("customMetricName").queryParam("nameParam", "bar").request().get(String.class))
+                .isEqualTo("bar");
         assertThat(registry.getTimers().entrySet().size()).isEqualTo(startingCount + 2);
-        assertThat(registry.getTimers().get("timedCounter[foo]").getCount()).isEqualTo(2);
+        assertThat(registry.getTimers().get("timed[bar]").getCount()).isEqualTo(2);
     }
 
     @Test

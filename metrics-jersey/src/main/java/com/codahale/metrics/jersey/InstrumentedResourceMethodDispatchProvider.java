@@ -153,13 +153,39 @@ class InstrumentedResourceMethodDispatchProvider implements ResourceMethodDispat
         throw (T) e;
     }
 
+    private final static MetricBuilder<Timer> TIMER_METRIC_BUILDER = new MetricBuilder<Timer>() {
+        @Override
+        public Timer buildMetric(MetricRegistry metricRegistry, String name) {
+            return metricRegistry.timer(name);
+        }
+    };
+    private final static MetricBuilder<Meter> METER_METRIC_BUILDER = new MetricBuilder<Meter>() {
+        @Override
+        public Meter buildMetric(MetricRegistry metricRegistry, String name) {
+            return metricRegistry.meter(name);
+        }
+    };
+
     private final ResourceMethodDispatchProvider provider;
     private final MetricRegistry registry;
+    private final ServerInjectableProviderFactory serverInjectableProviderFactory;
 
     public InstrumentedResourceMethodDispatchProvider(ResourceMethodDispatchProvider provider,
                                                       MetricRegistry registry) {
         this.provider = provider;
         this.registry = registry;
+
+        // Prepare a ServerInjectableProviderFactory to parse each request's HttpContext into its corresponding JAX-RS-derived values
+        serverInjectableProviderFactory = new ServerInjectableProviderFactory();
+        MultivaluedParameterExtractorProvider mpep =
+                new MultivaluedParameterExtractorFactory(new StringReaderFactory());
+        serverInjectableProviderFactory.add(new CookieParamInjectableProvider(mpep));
+        serverInjectableProviderFactory.add(new HeaderParamInjectableProvider(mpep));
+        serverInjectableProviderFactory.add(new HttpContextInjectableProvider());
+        serverInjectableProviderFactory.add(new MatrixParamInjectableProvider(mpep));
+        serverInjectableProviderFactory.add(new PathParamInjectableProvider(mpep));
+        serverInjectableProviderFactory.add(new QueryParamInjectableProvider(mpep));
+        serverInjectableProviderFactory.add(new FormParamInjectableProvider(mpep));
     }
 
     @Override
@@ -173,24 +199,14 @@ class InstrumentedResourceMethodDispatchProvider implements ResourceMethodDispat
         if (method.getMethod().isAnnotationPresent(Timed.class)) {
             final Timed annotation = method.getMethod().getAnnotation(Timed.class);
             final String name = chooseName(annotation.name(), annotation.absolute(), method);
-            MetricProvider<Timer> metricProvider = getMetricProvider(name, injectableValuesProvider, new MetricBuilder<Timer>() {
-                @Override
-                public Timer buildMetric(MetricRegistry metricRegistry, String name) {
-                    return metricRegistry.timer(name);
-                }
-            });
+            MetricProvider<Timer> metricProvider = getMetricProvider(name, injectableValuesProvider, TIMER_METRIC_BUILDER);
             dispatcher = new TimedRequestDispatcher(dispatcher, metricProvider);
         }
 
         if (method.getMethod().isAnnotationPresent(Metered.class)) {
             final Metered annotation = method.getMethod().getAnnotation(Metered.class);
             final String name = chooseName(annotation.name(), annotation.absolute(), method);
-            MetricProvider<Meter> metricProvider = getMetricProvider(name, injectableValuesProvider, new MetricBuilder<Meter>() {
-                @Override
-                public Meter buildMetric(MetricRegistry metricRegistry, String name) {
-                    return metricRegistry.meter(name);
-                }
-            });
+            MetricProvider<Meter> metricProvider = getMetricProvider(name, injectableValuesProvider, METER_METRIC_BUILDER);
             dispatcher = new MeteredRequestDispatcher(dispatcher, metricProvider);
         }
 
@@ -201,12 +217,7 @@ class InstrumentedResourceMethodDispatchProvider implements ResourceMethodDispat
                                            annotation.absolute(),
                                            method,
                                            ExceptionMetered.DEFAULT_NAME_SUFFIX);
-            MetricProvider<Meter> metricProvider = getMetricProvider(name, injectableValuesProvider, new MetricBuilder<Meter>() {
-                @Override
-                public Meter buildMetric(MetricRegistry metricRegistry, String name) {
-                    return metricRegistry.meter(name);
-                }
-            });
+            MetricProvider<Meter> metricProvider = getMetricProvider(name, injectableValuesProvider, METER_METRIC_BUILDER);
             dispatcher = new ExceptionMeteredRequestDispatcher(dispatcher,
                                                                metricProvider,
                                                                annotation.cause());
@@ -216,18 +227,9 @@ class InstrumentedResourceMethodDispatchProvider implements ResourceMethodDispat
     }
 
     private InjectableValuesProvider getInjectableValuesProvider(AbstractResourceMethod method) {
-        ServerInjectableProviderFactory serverInjectableProviderFactory = new ServerInjectableProviderFactory();
-        MultivaluedParameterExtractorProvider mpep =
-                new MultivaluedParameterExtractorFactory(new StringReaderFactory());
-        serverInjectableProviderFactory.add(new CookieParamInjectableProvider(mpep));
-        serverInjectableProviderFactory.add(new HeaderParamInjectableProvider(mpep));
-        serverInjectableProviderFactory.add(new HttpContextInjectableProvider());
-        serverInjectableProviderFactory.add(new MatrixParamInjectableProvider(mpep));
-        serverInjectableProviderFactory.add(new PathParamInjectableProvider(mpep));
-        serverInjectableProviderFactory.add(new QueryParamInjectableProvider(mpep));
-        serverInjectableProviderFactory.add(new FormParamInjectableProvider(mpep));
-
         InjectableValuesProvider injectableValuesProvider = null;
+
+        // Create a map keying each MetricNameParam's desired index in the String.format() call to the Injectable responsible for deriving its value
         Map<Integer, Injectable> injectableMap = new HashMap<Integer, Injectable>();
         for (Parameter parameter : method.getParameters()) {
             MetricNameParam metricNameParam = parameter.getAnnotation(MetricNameParam.class);
@@ -235,7 +237,10 @@ class InstrumentedResourceMethodDispatchProvider implements ResourceMethodDispat
                 injectableMap.put(metricNameParam.value(), serverInjectableProviderFactory.getInjectable(method.getMethod(), parameter, ComponentScope.PerRequest));
             }
         }
+
         if (injectableMap.size() > 0) {
+            // Create a list of MetricNameParam Injectables in the order they will appear in the String.format() call. Error-check to ensure that the provided
+            // indices are contiguous and begin at "0".
             List<Injectable> parameterizedInjectables = new ArrayList<Injectable>(injectableMap.size());
             for (int i = 0; i < injectableMap.size(); i++) {
                 Injectable injectableForIndex = injectableMap.get(i);
@@ -251,6 +256,7 @@ class InstrumentedResourceMethodDispatchProvider implements ResourceMethodDispat
     }
 
     private <T extends Metric> MetricProvider<T> getMetricProvider(String name, InjectableValuesProvider injectableValuesProvider, MetricBuilder<T> metricBuilder) {
+        // Use the RequestSpecificMetricProvider if any MetricNameParams were specified. Otherwise fall back on the more performant StaticMetricProvider.
         if (injectableValuesProvider != null) {
             return new RequestSpecificMetricProvider<T>(name, injectableValuesProvider, registry, metricBuilder);
         } else {

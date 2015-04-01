@@ -41,6 +41,19 @@ import static com.codahale.metrics.MetricRegistry.name;
 @Provider
 public class InstrumentedResourceMethodApplicationListener implements ApplicationEventListener {
 
+    private final static MetricBuilder<Timer> TIMER_METRIC_BUILDER = new MetricBuilder<Timer>() {
+        @Override
+        public Timer buildMetric(MetricRegistry metricRegistry, String name) {
+            return metricRegistry.timer(name);
+        }
+    };
+    private final static MetricBuilder<Meter> METER_METRIC_BUILDER = new MetricBuilder<Meter>() {
+        @Override
+        public Meter buildMetric(MetricRegistry metricRegistry, String name) {
+            return metricRegistry.meter(name);
+        }
+    };
+
     private final MetricRegistry metrics;
     private final ServiceLocator serviceLocator;
     private ImmutableMap<Method, MetricProvider<Timer>> timers = ImmutableMap.of();
@@ -100,10 +113,14 @@ public class InstrumentedResourceMethodApplicationListener implements Applicatio
         @Override
         public T getMetric(Invocable invocable) {
             java.util.List<org.glassfish.hk2.api.Factory<?>> valueProviders = invocable.getValueProviders(serviceLocator);
+
+            // Evaluate the request values and re-order them from the order they appear in the Resource method to the order desired in the String.format() call
             Object[] paramList = new Object[paramIndexList.size()];
             for (int i = 0; i < paramIndexList.size(); i++) {
-                paramList[i] = valueProviders.get(paramIndexList.get(i)).provide();
+                int resourceParamIndex = paramIndexList.get(i);
+                paramList[i] = valueProviders.get(resourceParamIndex).provide();
             }
+
             String formattedName = String.format(baseName, paramList);
             return metricBuilder.buildMetric(metricRegistry, formattedName);
         }
@@ -114,16 +131,17 @@ public class InstrumentedResourceMethodApplicationListener implements Applicatio
      * {@link ExceptionMetered} annotation, which needs to maintain both a meter
      * and a cause for which the meter should be updated.
      */
-    private class ExceptionMeterMetric {
+    private static class ExceptionMeterMetric {
         public final MetricProvider<Meter> meterProvider;
         public final Class<? extends Throwable> cause;
 
         public ExceptionMeterMetric(final MetricRegistry registry,
                                     final ResourceMethod method,
-                                    final ExceptionMetered exceptionMetered) {
+                                    final ExceptionMetered exceptionMetered,
+                                    final ServiceLocator serviceLocator) {
             final String name = chooseName(exceptionMetered.name(),
                     exceptionMetered.absolute(), method, ExceptionMetered.DEFAULT_NAME_SUFFIX);
-            this.meterProvider = meterMetric(name, registry, method);
+            this.meterProvider = createMeterMetricProvider(name, registry, method, serviceLocator);
             this.cause = exceptionMetered.cause();
         }
     }
@@ -257,7 +275,7 @@ public class InstrumentedResourceMethodApplicationListener implements Applicatio
         final Timed annotation = definitionMethod.getAnnotation(Timed.class);
 
         if (annotation != null) {
-            builder.put(definitionMethod, timerMetric(this.metrics, method, annotation));
+            builder.put(definitionMethod, createTimerMetricProvider(this.metrics, method, annotation, serviceLocator));
         }
     }
 
@@ -267,7 +285,7 @@ public class InstrumentedResourceMethodApplicationListener implements Applicatio
         final Metered annotation = definitionMethod.getAnnotation(Metered.class);
 
         if (annotation != null) {
-            builder.put(definitionMethod, meterMetric(metrics, method, annotation));
+            builder.put(definitionMethod, createMeterMetricProvider(metrics, method, annotation, serviceLocator));
         }
     }
 
@@ -277,13 +295,14 @@ public class InstrumentedResourceMethodApplicationListener implements Applicatio
         final ExceptionMetered annotation = definitionMethod.getAnnotation(ExceptionMetered.class);
 
         if (annotation != null) {
-            builder.put(definitionMethod, new ExceptionMeterMetric(metrics, method, annotation));
+            builder.put(definitionMethod, new ExceptionMeterMetric(metrics, method, annotation, serviceLocator));
         }
     }
 
-    private <T extends Metric> MetricProvider<T> getMetricProvider(String name, ResourceMethod method, MetricBuilder<T> metricBuilder) {
+    private static <T extends Metric> MetricProvider<T> createMetricProvider(String name, ResourceMethod method, MetricBuilder<T> metricBuilder, MetricRegistry metricRegistry, ServiceLocator serviceLocator) {
         Map<Integer, Integer> paramToIndexMap = new HashMap<Integer, Integer>();
 
+        // Create a map keying each MetricNameParam's desired index in the String.format() call to its position in the Resource method's arg list
         Annotation[][] annotations = method.getInvocable().getDefinitionMethod().getParameterAnnotations();
         for (int paramIndex = 0; paramIndex < annotations.length; paramIndex++) {
             for (int annotationIndex = 0; annotationIndex < annotations[paramIndex].length; annotationIndex++) {
@@ -293,7 +312,10 @@ public class InstrumentedResourceMethodApplicationListener implements Applicatio
                 }
             }
         }
+
         if (paramToIndexMap.size() > 0) {
+            // Create a list of Resource args in the order they will appear in the String.format() call. Error-check to ensure that the provided MetricNameParam
+            // values are contiguous and begin at "0".
             List<Integer> paramIndexList = new ArrayList<Integer>(paramToIndexMap.size());
             for (int i = 0; i < paramToIndexMap.size(); i++) {
                 Integer paramIndex = paramToIndexMap.get(i);
@@ -302,44 +324,39 @@ public class InstrumentedResourceMethodApplicationListener implements Applicatio
                 }
                 paramIndexList.add(paramIndex);
             }
-            return new RequestSpecificMetricProvider<T>(name, metrics, metricBuilder, paramIndexList, serviceLocator);
+            return new RequestSpecificMetricProvider<T>(name, metricRegistry, metricBuilder, paramIndexList, serviceLocator);
         } else {
-            return new StaticMetricProvider<T>(metricBuilder.buildMetric(metrics, name));
+            // Fall back on the more performant StaticMetricProvider if no per-request data is needed for the metric name
+            return new StaticMetricProvider<T>(metricBuilder.buildMetric(metricRegistry, name));
         }
     }
 
-    private MetricProvider<Timer> timerMetric(final MetricRegistry registry,
-                                     final ResourceMethod method,
-                                     final Timed timed) {
-        return timerMetric(chooseName(timed.name(), timed.absolute(), method), registry, method);
+    private static MetricProvider<Timer> createTimerMetricProvider(final MetricRegistry registry,
+                                                                   final ResourceMethod method,
+                                                                   final Timed timed,
+                                                                   final ServiceLocator serviceLocator) {
+        return createTimerMetricProvider(chooseName(timed.name(), timed.absolute(), method), registry, method, serviceLocator);
     }
 
-    private MetricProvider<Timer> timerMetric(String name,
-                                              final MetricRegistry registry,
-                                              final ResourceMethod method) {
-        return getMetricProvider(name, method, new MetricBuilder<Timer>() {
-            @Override
-            public Timer buildMetric(MetricRegistry metricRegistry, String name) {
-                return registry.timer(name);
-            }
-        });
+    private static MetricProvider<Timer> createTimerMetricProvider(String name,
+                                                                   final MetricRegistry registry,
+                                                                   final ResourceMethod method,
+                                                                   final ServiceLocator serviceLocator) {
+        return createMetricProvider(name, method, TIMER_METRIC_BUILDER, registry, serviceLocator);
     }
 
-    private MetricProvider<Meter> meterMetric(final MetricRegistry registry,
-                                     final ResourceMethod method,
-                                     final Metered metered) {
-        return meterMetric(chooseName(metered.name(), metered.absolute(), method), registry, method);
+    private static MetricProvider<Meter> createMeterMetricProvider(final MetricRegistry registry,
+                                                                   final ResourceMethod method,
+                                                                   final Metered metered,
+                                                                   final ServiceLocator serviceLocator) {
+        return createMeterMetricProvider(chooseName(metered.name(), metered.absolute(), method), registry, method, serviceLocator);
     }
 
-    private MetricProvider<Meter> meterMetric(String name,
-                                              final MetricRegistry registry,
-                                              final ResourceMethod method) {
-        return getMetricProvider(name, method, new MetricBuilder<Meter>() {
-            @Override
-            public Meter buildMetric(MetricRegistry metricRegistry, String name) {
-                return registry.meter(name);
-            }
-        });
+    private static MetricProvider<Meter> createMeterMetricProvider(String name,
+                                                                   final MetricRegistry registry,
+                                                                   final ResourceMethod method,
+                                                                   final ServiceLocator serviceLocator) {
+        return createMetricProvider(name, method, METER_METRIC_BUILDER, registry, serviceLocator);
     }
 
     protected static String chooseName(final String explicitName, final boolean absolute, final ResourceMethod method, final String... suffixes) {
