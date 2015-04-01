@@ -58,13 +58,13 @@ class InstrumentedResourceMethodDispatchProvider implements ResourceMethodDispat
         }
     }
 
-    private static class ContextSensitiveMetricProvider<T extends Metric> implements MetricProvider<T> {
+    private static class RequestSpecificMetricProvider<T extends Metric> implements MetricProvider<T> {
         private String baseName;
         private InjectableValuesProvider injectableValuesProvider;
         private MetricRegistry metricRegistry;
         private MetricBuilder<T> metricBuilder;
 
-        private ContextSensitiveMetricProvider(String baseName, InjectableValuesProvider injectableValuesProvider, MetricRegistry metricRegistry, MetricBuilder<T> metricBuilder) {
+        private RequestSpecificMetricProvider(String baseName, InjectableValuesProvider injectableValuesProvider, MetricRegistry metricRegistry, MetricBuilder<T> metricBuilder) {
             this.baseName = baseName;
             this.injectableValuesProvider = injectableValuesProvider;
             this.metricRegistry = metricRegistry;
@@ -252,7 +252,7 @@ class InstrumentedResourceMethodDispatchProvider implements ResourceMethodDispat
 
     private <T extends Metric> MetricProvider<T> getMetricProvider(String name, InjectableValuesProvider injectableValuesProvider, MetricBuilder<T> metricBuilder) {
         if (injectableValuesProvider != null) {
-            return new ContextSensitiveMetricProvider<T>(name, injectableValuesProvider, registry, metricBuilder);
+            return new RequestSpecificMetricProvider<T>(name, injectableValuesProvider, registry, metricBuilder);
         } else {
             return new StaticMetricProvider<T>(metricBuilder.buildMetric(registry, name));
         }

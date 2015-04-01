@@ -82,14 +82,14 @@ public class InstrumentedResourceMethodApplicationListener implements Applicatio
         }
     }
 
-    private static class ContextSensitiveMetricProvider<T extends Metric> implements MetricProvider<T> {
+    private static class RequestSpecificMetricProvider<T extends Metric> implements MetricProvider<T> {
         private final String baseName;
         private final MetricRegistry metricRegistry;
         private final MetricBuilder<T> metricBuilder;
         private final List<Integer> paramIndexList;
         private final ServiceLocator serviceLocator;
 
-        private ContextSensitiveMetricProvider(String baseName, MetricRegistry metricRegistry, MetricBuilder<T> metricBuilder, List<Integer> paramIndexList, ServiceLocator serviceLocator) {
+        private RequestSpecificMetricProvider(String baseName, MetricRegistry metricRegistry, MetricBuilder<T> metricBuilder, List<Integer> paramIndexList, ServiceLocator serviceLocator) {
             this.baseName = baseName;
             this.metricRegistry = metricRegistry;
             this.metricBuilder = metricBuilder;
@@ -302,7 +302,7 @@ public class InstrumentedResourceMethodApplicationListener implements Applicatio
                 }
                 paramIndexList.add(paramIndex);
             }
-            return new ContextSensitiveMetricProvider<T>(name, metrics, metricBuilder, paramIndexList, serviceLocator);
+            return new RequestSpecificMetricProvider<T>(name, metrics, metricBuilder, paramIndexList, serviceLocator);
         } else {
             return new StaticMetricProvider<T>(metricBuilder.buildMetric(metrics, name));
         }
