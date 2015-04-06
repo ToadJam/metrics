@@ -64,7 +64,8 @@ class InstrumentedResourceMethodDispatchProvider implements ResourceMethodDispat
         private MetricRegistry metricRegistry;
         private MetricBuilder<T> metricBuilder;
 
-        private RequestSpecificMetricProvider(String baseName, InjectableValuesProvider injectableValuesProvider, MetricRegistry metricRegistry, MetricBuilder<T> metricBuilder) {
+        private RequestSpecificMetricProvider(String baseName, InjectableValuesProvider injectableValuesProvider,
+                                              MetricRegistry metricRegistry, MetricBuilder<T> metricBuilder) {
             this.baseName = baseName;
             this.injectableValuesProvider = injectableValuesProvider;
             this.metricRegistry = metricRegistry;
@@ -175,7 +176,8 @@ class InstrumentedResourceMethodDispatchProvider implements ResourceMethodDispat
         this.provider = provider;
         this.registry = registry;
 
-        // Prepare a ServerInjectableProviderFactory to parse each request's HttpContext into its corresponding JAX-RS-derived values
+        // Prepare a ServerInjectableProviderFactory to parse each request's HttpContext into its corresponding
+        // JAX-RS-derived values
         serverInjectableProviderFactory = new ServerInjectableProviderFactory();
         MultivaluedParameterExtractorProvider mpep =
                 new MultivaluedParameterExtractorFactory(new StringReaderFactory());
@@ -229,17 +231,20 @@ class InstrumentedResourceMethodDispatchProvider implements ResourceMethodDispat
     private InjectableValuesProvider getInjectableValuesProvider(AbstractResourceMethod method) {
         InjectableValuesProvider injectableValuesProvider = null;
 
-        // Create a map keying each MetricNameParam's desired index in the String.format() call to the Injectable responsible for deriving its value
+        // Create a map keying each MetricNameParam's desired index in the String.format() call to the Injectable
+        // responsible for deriving its value
         Map<Integer, Injectable> injectableMap = new HashMap<Integer, Injectable>();
         for (Parameter parameter : method.getParameters()) {
             MetricNameParam metricNameParam = parameter.getAnnotation(MetricNameParam.class);
             if (metricNameParam != null) {
-                injectableMap.put(metricNameParam.value(), serverInjectableProviderFactory.getInjectable(method.getMethod(), parameter, ComponentScope.PerRequest));
+                injectableMap.put(metricNameParam.value(), serverInjectableProviderFactory.getInjectable(method.getMethod(),
+                        parameter, ComponentScope.PerRequest));
             }
         }
 
         if (injectableMap.size() > 0) {
-            // Create a list of MetricNameParam Injectables in the order they will appear in the String.format() call. Error-check to ensure that the provided
+            // Create a list of MetricNameParam Injectables in the order they will appear in the String.format() call.
+            // Error-check to ensure that the provided
             // indices are contiguous and begin at "0".
             List<Injectable> parameterizedInjectables = new ArrayList<Injectable>(injectableMap.size());
             for (int i = 0; i < injectableMap.size(); i++) {
@@ -255,8 +260,11 @@ class InstrumentedResourceMethodDispatchProvider implements ResourceMethodDispat
         return injectableValuesProvider;
     }
 
-    private <T extends Metric> MetricProvider<T> getMetricProvider(String name, InjectableValuesProvider injectableValuesProvider, MetricBuilder<T> metricBuilder) {
-        // Use the RequestSpecificMetricProvider if any MetricNameParams were specified. Otherwise fall back on the more performant StaticMetricProvider.
+    private <T extends Metric> MetricProvider<T> getMetricProvider(String name,
+                                                                   InjectableValuesProvider injectableValuesProvider,
+                                                                   MetricBuilder<T> metricBuilder) {
+        // Use the RequestSpecificMetricProvider if any MetricNameParams were specified. Otherwise fall back on the more
+        // performant StaticMetricProvider.
         if (injectableValuesProvider != null) {
             return new RequestSpecificMetricProvider<T>(name, injectableValuesProvider, registry, metricBuilder);
         } else {

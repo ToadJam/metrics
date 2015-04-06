@@ -44,7 +44,8 @@ public class MetricsFeature implements Feature {
      */
     @Override
     public boolean configure(FeatureContext context) {
-        context.register(new InstrumentedResourceMethodApplicationListener(registry, ServiceLocatorProvider.getServiceLocator(context)));
+        context.register(new InstrumentedResourceMethodApplicationListener(registry,
+                ServiceLocatorProvider.getServiceLocator(context)));
         return true;
     }
 }

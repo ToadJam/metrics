@@ -69,7 +69,8 @@ public class InstrumentedResourceMethodApplicationListener implements Applicatio
      *
      * @param metrics a {@link MetricRegistry}
      */
-    public InstrumentedResourceMethodApplicationListener(final MetricRegistry metrics, final ServiceLocator serviceLocator) {
+    public InstrumentedResourceMethodApplicationListener(final MetricRegistry metrics,
+                                                         final ServiceLocator serviceLocator) {
         this.metrics = metrics;
         this.serviceLocator = serviceLocator;
     }
@@ -102,7 +103,9 @@ public class InstrumentedResourceMethodApplicationListener implements Applicatio
         private final List<Integer> paramIndexList;
         private final ServiceLocator serviceLocator;
 
-        private RequestSpecificMetricProvider(String baseName, MetricRegistry metricRegistry, MetricBuilder<T> metricBuilder, List<Integer> paramIndexList, ServiceLocator serviceLocator) {
+        private RequestSpecificMetricProvider(String baseName, MetricRegistry metricRegistry,
+                                              MetricBuilder<T> metricBuilder, List<Integer> paramIndexList,
+                                              ServiceLocator serviceLocator) {
             this.baseName = baseName;
             this.metricRegistry = metricRegistry;
             this.metricBuilder = metricBuilder;
@@ -114,7 +117,8 @@ public class InstrumentedResourceMethodApplicationListener implements Applicatio
         public T getMetric(Invocable invocable) {
             java.util.List<org.glassfish.hk2.api.Factory<?>> valueProviders = invocable.getValueProviders(serviceLocator);
 
-            // Evaluate the request values and re-order them from the order they appear in the Resource method to the order desired in the String.format() call
+            // Evaluate the request values and re-order them from the order they appear in the Resource method to the
+            // order desired in the String.format() call
             Object[] paramList = new Object[paramIndexList.size()];
             for (int i = 0; i < paramIndexList.size(); i++) {
                 int resourceParamIndex = paramIndexList.get(i);
@@ -233,9 +237,12 @@ public class InstrumentedResourceMethodApplicationListener implements Applicatio
     @Override
     public void onEvent(ApplicationEvent event) {
         if (event.getType() == ApplicationEvent.Type.INITIALIZATION_APP_FINISHED) {
-            final ImmutableMap.Builder<Method, MetricProvider<Timer>> timerBuilder = ImmutableMap.<Method, MetricProvider<Timer>>builder();
-            final ImmutableMap.Builder<Method, MetricProvider<Meter>> meterBuilder = ImmutableMap.<Method, MetricProvider<Meter>>builder();
-            final ImmutableMap.Builder<Method, ExceptionMeterMetric> exceptionMeterBuilder = ImmutableMap.<Method, ExceptionMeterMetric>builder();
+            final ImmutableMap.Builder<Method, MetricProvider<Timer>> timerBuilder =
+                    ImmutableMap.<Method, MetricProvider<Timer>>builder();
+            final ImmutableMap.Builder<Method, MetricProvider<Meter>> meterBuilder =
+                    ImmutableMap.<Method, MetricProvider<Meter>>builder();
+            final ImmutableMap.Builder<Method, ExceptionMeterMetric> exceptionMeterBuilder =
+                    ImmutableMap.<Method, ExceptionMeterMetric>builder();
 
             for (final Resource resource : event.getResourceModel().getResources()) {
                 for (final ResourceMethod method : resource.getAllMethods()) {
@@ -299,10 +306,14 @@ public class InstrumentedResourceMethodApplicationListener implements Applicatio
         }
     }
 
-    private static <T extends Metric> MetricProvider<T> createMetricProvider(String name, ResourceMethod method, MetricBuilder<T> metricBuilder, MetricRegistry metricRegistry, ServiceLocator serviceLocator) {
+    private static <T extends Metric> MetricProvider<T> createMetricProvider(String name, ResourceMethod method,
+                                                                             MetricBuilder<T> metricBuilder,
+                                                                             MetricRegistry metricRegistry,
+                                                                             ServiceLocator serviceLocator) {
         Map<Integer, Integer> paramToIndexMap = new HashMap<Integer, Integer>();
 
-        // Create a map keying each MetricNameParam's desired index in the String.format() call to its position in the Resource method's arg list
+        // Create a map keying each MetricNameParam's desired index in the String.format() call to its position in the
+        // Resource method's arg list
         Annotation[][] annotations = method.getInvocable().getDefinitionMethod().getParameterAnnotations();
         for (int paramIndex = 0; paramIndex < annotations.length; paramIndex++) {
             for (int annotationIndex = 0; annotationIndex < annotations[paramIndex].length; annotationIndex++) {
@@ -314,8 +325,8 @@ public class InstrumentedResourceMethodApplicationListener implements Applicatio
         }
 
         if (paramToIndexMap.size() > 0) {
-            // Create a list of Resource args in the order they will appear in the String.format() call. Error-check to ensure that the provided MetricNameParam
-            // values are contiguous and begin at "0".
+            // Create a list of Resource args in the order they will appear in the String.format() call. Error-check to
+            // ensure that the provided MetricNameParam values are contiguous and begin at "0".
             List<Integer> paramIndexList = new ArrayList<Integer>(paramToIndexMap.size());
             for (int i = 0; i < paramToIndexMap.size(); i++) {
                 Integer paramIndex = paramToIndexMap.get(i);
